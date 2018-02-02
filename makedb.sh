@@ -148,7 +148,9 @@ create-database us-east-1 $new_instance_identifier $instance-$snap_id_date$encsu
 
 # disable backup retention, apply groups
 sleep 120
-$statusmods="unknown"
+
+statusmods="unknown"
+
 while [[ $statusmods != 0 ]]; do
 statusmods=`aws rds describe-db-instances --db-instance-id=$new_instance_identifier | grep -i -E "creating|modifying" | wc -l | tee | grep -o '[0-9]\+'`
 echo "not done applying and readily available. Still waiting for modification to be 0. Currently $statusmods"
