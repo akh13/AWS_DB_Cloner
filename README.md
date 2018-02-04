@@ -2,7 +2,7 @@
 
 This script is a simple clone / copy helper for AWS RDS. It takes an existing, running database, and in order:
 
-* Makes a snapshot of the (unencrypted) database
+* Makes a snapshot of the existing, running database
 * Encrypts that snapshot
 * Spins out a new database beside the DB in the same region
 
