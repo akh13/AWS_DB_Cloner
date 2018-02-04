@@ -10,5 +10,5 @@ Depending on the size of your database, this could take some time.
 
 ## To do:
 
-* Add option to encrypt or not to encrypt resulting DB
 * Clean out old junk functions and other cruft from "experiments"
+* Optimize the if-else portion of the code for encryption
