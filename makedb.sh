@@ -1,5 +1,4 @@
 #!/bin/bash
-
 ############################## Settings and Configuration #################
 
 # Old, unencrypted database name
@@ -27,16 +26,16 @@ snap_id_date=`date "+%Y-%m-%d-%H"`
 kms="12384dd-f123-f123-9876-abcabcabc123"
 
 # Retention period for the new DB
-retpd=7
+retpd=14
 
 # IOPS of new DB
-iops=3000
+iops=5000
 
 # Make the new instance multi-AZ?
-multiaz="false"
+multiaz="true"
 
-# Encryopt? Should the new DB and the snapshot be encrypted with a KMS key?
-encryptme="false"
+# Encrypt? Should the new DB and the snapshot be encrypted with a KMS key?
+encryptme="true"
 
 # The default AWS Region
 AWS_DEFAULT_REGION=us-east-1
@@ -44,8 +43,72 @@ AWS_DEFAULT_REGION=us-east-1
 # The encryption suffix to use (if encryting)
 encsuffix=-enc
 
+# Create a read replica in the region? (must set retention period for backups if true)
+readrep="true"
+
+# Replica instance class
+repclass="db.m4.2xlarge"
+
+# Backup window
+timeback="01:00-02:00"
 
 ############################# Functions and other misc ######################
+
+function create-replica {
+  reg=$1
+  nii=$2
+  ic=$3
+  ios=$4
+  key=$5
+  stats="unknown"
+  repl="replica"
+
+ echo "Initializing replica creation procedure."
+
+ if [[ "$az" == "false" ]]; then
+  echo "AZ is set to $az, not making multi-az"
+    az="--no-multi-az"
+  elif [[ "$az" == "true" ]]; then
+  echo "AZ is set to $az, making multi-az"
+    az="--multi-az"
+  else
+  echo "set to $az"
+ fi
+
+ if [[ "$encryptme" == "false" ]]; then
+    addkms=""
+  else
+    addkms="--kms-key-id $key"
+ fi
+
+aws rds --region=$reg reboot-db-instance --dbinstance-identifier $nii
+sleep 120
+
+status1=unknown
+while [[ $status1 != 0 ]]; do
+status1=`aws rds describe-db-instances --db-instance-id=$new_instance_identifier | grep -i -E "creating|modifying|storage-optimization|rebooting" | wc -l | tee | grep -o '[0-9]\+'`
+aws rds describe-db-instances --db-instance-id=$new_instance_identifier
+echo "Waiting for modification to be 0 for replica creation. Currently $statusmods"
+sleep 120
+done
+
+  aws --region=$reg rds create-db-instance-read-replica \
+  --db-instance-identifier $nii$repl \
+  --source-db-instance-identifier $nii \
+  --db-instance-class $ic \
+  --iops $ios \
+  --no-publicly-accessible \
+  $addkms
+
+
+echo aws --region=$reg rds create-db-instance-read-replica \
+  --db-instance-identifier $nii$repl \
+  --source-db-instance-identifier $nii \
+  --db-instance-class $ic \
+  --iops $ios \
+  --no-publicly-accessible \
+  $addkms
+}
 
 function create-database {
   stats="unknown"
@@ -151,9 +214,8 @@ echo "Creating new database: $new_instance_identifier with $instance-$snap_id_da
 # create database region, new db name, snapshot ID, db instance type, storage type, multi-az, option group, subnet group
 create-database $AWS_DEFAULT_REGION $new_instance_identifier $instance-$snap_id_date$encsuffix $instance_class $iops $multiaz default:mysql-5-6 $subnet_group
 
-# disable backup retention, apply groups
 sleep 120
-$statusmods="unknown"
+statusmods="unknown"
 while [[ $statusmods != 0 ]]; do
 statusmods=`aws rds describe-db-instances --db-instance-id=$new_instance_identifier | grep -i -E "creating|modifying" | wc -l | tee | grep -o '[0-9]\+'`
 echo "not done applying and readily available. Still waiting for modification to be 0. Currently $statusmods"
@@ -163,8 +225,8 @@ sleep 60
 done
 
 aws rds --region=$AWS_DEFAULT_REGION modify-db-instance --db-instance-identifier=$new_instance_identifier \
---backup-retention-period $retpd --db-parameter-group-name $param_group \
---vpc-security
+--backup-retention-period $retpd --preferred-backup-window $timeback --db-parameter-group-name $param_group \
+--vpc-security --apply-immediately
 
 sleep 60
 statusmods="unknown"
@@ -218,12 +280,25 @@ aws rds --region=$AWS_DEFAULT_REGION modify-db-instance --db-instance-identifier
 sleep 60
 statusmods="unknown"
 while [[ $statusmods != 0 ]]; do
-statusmods=`aws rds describe-db-instances --db-instance-id=$new_instance_identifier | grep -i -E "creating|modifying" | wc -l | tee | grep -o '[0-9]\+'`
+statusmods=`aws rds describe-db-instances --db-instance-id=$new_instance_identifier | grep -i -E "creating|modifying|storage-optimization" | wc -l | tee | grep -o '[0-9]\+'`
 aws rds describe-db-instances --db-instance-id=$new_instance_identifier
 echo "not done applying and readily available. Still waiting for modification to be 0. Currently $statusmods"
-echo "The param group has been applied. Safe to reboot."
-sleep 120
+echo "The param group has been applied."
 done
 
 fi
+
+############################Replica Stuff##############################
+
+ if [[ "$readrep" == "false" ]]; then
+  echo "Readrep is set to $readrep, not making Read Replica"
+  elif [[ "$readrep" == "true" ]]; then
+  echo "Readrep is set to $readrep, making Read Replica"
+    create-replica $AWS_DEFAULT_REGION $new_instance_identifier $repclass $iops $kms
+  else
+  echo "Readrep var is $readrep. Don't know what this means."
+ fi
+
+############################Replica Stuff##############################
+
 exit 0
